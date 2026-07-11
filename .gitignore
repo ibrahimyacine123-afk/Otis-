@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+venv/
+node_modules/
+.wwebjs_auth/
+.wwebjs_cache/
+whatsapp-bridge/debug_screenshot.png

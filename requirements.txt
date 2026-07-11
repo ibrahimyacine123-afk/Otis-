@@ -1,0 +1,11 @@
+openai
+python-dotenv
+supabase
+psycopg2-binary
+fastapi
+uvicorn
+pydantic
+streamlit
+pandas
+duckduckgo-search
+dateparser
