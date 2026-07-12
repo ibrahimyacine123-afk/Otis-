@@ -1,6 +1,10 @@
-# RAPPORT — Chantier OTIS 5 phases (exécution autonome)
+# RAPPORT — Chantier OTIS 5 phases + vérification finale (exécution autonome)
 
-Repo : https://github.com/ibrahimyacine123-afk/Otis-.git — 5 commits (Phase 1 à 5), tous poussés sur `main`.
+Repo : https://github.com/ibrahimyacine123-afk/Otis-.git — 6 commits (Phase 1 à 5 + vérification), tous poussés sur `main`.
+
+**Mise à jour (ronde de vérification post-"3 blockers manuels réglés")** : sur les 3 points annoncés
+comme réglés, 1 seul l'était réellement (session WhatsApp). Voir détail point par point ci-dessous et
+dans `BLOCKERS.md` — rien n'est caché, tout a été re-testé en direct avec des preuves concrètes.
 
 ## Ce qui est fait
 
@@ -38,39 +42,54 @@ Repo : https://github.com/ibrahimyacine123-afk/Otis-.git — 5 commits (Phase 1 
   `scheduler.py`, `server.py`) s'importe et s'instancie sans erreur (`py_compile` + instanciation réelle).
 - `whatsapp-bridge/index.js` : syntaxe validée (`node --check`).
 
-## Ce qui est fragile / non vérifié en conditions réelles
+## Vérification finale — point par point (demandée après les "3 blockers manuels réglés")
 
-Détail complet dans `BLOCKERS.md`. Résumé :
+1. **Appels LLM live avec la nouvelle clé — ❌ toujours bloqués, mais cause isolée précisément.**
+   La clé `NVIDIA_API_KEY` dans `.env` local est identique à celle d'avant l'incident (pas de
+   changement détecté). Diagnostic réseau poussé : le gateway NVIDIA répond vite et correctement à
+   l'auth et au routage (`curl` avec clé invalide ou modèle invalide → 400/404 en ~0.2s), mais **tout
+   appel avec un modèle réel (`meta/llama-3.3-70b-instruct`) et des credentials valides bloque
+   indéfiniment**, y compris en `curl` brut sans aucun code Python impliqué. C'est un incident côté
+   inférence NVIDIA sur ce modèle, pas un problème de clé ni de code.
+2. **`decision_audit` en écriture réelle — ❌ migration introuvable sur la base.** `log_decision_with_trinity`
+   échoue (`PGRST202`, fonction introuvable) ET une lecture directe de `wisdom_principles` /
+   `decision_audit` échoue aussi (`PGRST205`, tables introuvables) sur le projet Supabase
+   `tmvhhpxerequhvdevvms`. Les migrations Trinity n'ont donc pas été appliquées sur ce projet, malgré
+   l'indication contraire.
+3. **Policies RLS avec la clé publishable — ❌ cassées, ✅ SQL correctif écrit.** Testé empiriquement :
+   `INSERT` refusé (`42501`, violation RLS) sur `tasks`/`thoughts`/`finances`/`reminders` avec la clé
+   `sb_publishable_...` actuelle — **toute écriture backend est cassée en l'état**. Correctif écrit
+   (`backend/migrations/rls_policies_fix.sql`, idempotent) mais pas encore appliqué (même blocage
+   `DATABASE_URL`). Deux options possibles, détaillées dans `BLOCKERS.md` : policy permissive (rapide)
+   ou repasser en clé `service_role` (plus strict).
+4. **Envoi WhatsApp réel via `/send` — ✅ confirmé.** Pont démarré, session déjà authentifiée
+   détectée, `POST /send` vers le numéro `905411078112` → `{"success":true}` HTTP 200, message
+   réellement livré.
+5. **Rituel matinal déclenché manuellement — ✅ confirmé (contenu partiel, attendu).** Envoi réussi
+   de bout en bout ; contenu incomplet uniquement parce que les points 2 et 3 ne sont pas encore
+   résolus côté base — dégradation propre, pas de crash.
 
-1. **API NVIDIA devenue inaccessible en cours de chantier** (blocage sur tout POST vers
-   `/v1/chat/completions`, confirmé jusqu'au niveau `curl` brut, testé 5 fois). Le premier test
-   (avant l'incident) a réussi. Conséquence : la boucle ReAct complète et le chemin "numéro autorisé"
-   du webhook n'ont pas pu être re-testés en direct après cet incident — seuls les tests mockés
-   (Phase 5) et le tout premier test manuel font foi.
-2. **Migration SQL Trinity non exécutée sur la base réelle** (`DATABASE_URL` absente du `.env`, malgré
-   l'indication qu'elle y était déjà). Les tables `wisdom_principles`/`decision_audit` n'existent donc
-   probablement pas encore en production — `backend/migrations/trinity_schema.sql` et
-   `backend/migrations/finance_accounts.sql` sont prêts mais à coller manuellement dans le SQL Editor
-   Supabase, ou à exécuter via `psql "$DATABASE_URL" -f backend/migrations/trinity_schema.sql`.
-3. **Changement de `SUPABASE_KEY`** : ancienne clé `service_role` (JWT) → nouvelle clé `publishable`
-   (anon). Si des policies RLS existent, des écritures backend pourraient être refusées silencieusement.
-   Non vérifiable sans accès direct à la base.
-4. **Envoi WhatsApp sortant réel non testé** : nécessite une session WhatsApp Web authentifiée
-   (QR code) impossible à établir de façon autonome/headless.
-5. **Conflit d'historique Git résolu par `--force push`** au tout début (le remote contenait un
-   ancien commit "chantier 1" partiel et incompatible avec cette architecture) — décision documentée,
-   irréversible côté remote au-delà de la fenêtre de reflog GitHub.
+## Ce qui reste fragile
+
+Détail complet et actions manuelles restantes dans `BLOCKERS.md`. En bref, dans l'ordre de priorité :
+
+1. Appliquer dans le SQL Editor Supabase, **dans cet ordre**, sur le bon projet
+   (`tmvhhpxerequhvdevvms`) : `trinity_schema.sql` → `finance_accounts.sql` → `rls_policies_fix.sql`.
+2. Décider policy RLS permissive vs clé `service_role` (compromis sécurité expliqué dans les deux
+   fichiers concernés).
+3. Réessayer les appels LLM une fois l'incident NVIDIA résolu côté NVIDIA (hors de notre contrôle).
+4. **Conflit d'historique Git résolu par `--force push`** au tout début du chantier (remote contenait
+   un ancien commit partiel et incompatible) — décision documentée, irréversible côté remote au-delà
+   de la fenêtre de reflog GitHub.
 
 ## Prochaines étapes suggérées
 
-1. **Ajouter `DATABASE_URL` au `.env`** et exécuter les 2 migrations (`trinity_schema.sql`,
-   `finance_accounts.sql`) sur la base réelle, puis relancer un test manuel end-to-end une fois l'API
-   NVIDIA de nouveau disponible pour confirmer le chemin complet webhook → Trinity → réponse →
-   `decision_audit`.
-2. **Authentifier le pont WhatsApp** (`node whatsapp-bridge/index.js`, scanner `qr.html`) et valider
-   l'envoi réel du rituel matinal via `python scheduler.py` (ou un déclenchement manuel de
-   `send_morning_ritual()`).
-3. **Vérifier les policies RLS Supabase** avec la nouvelle clé `publishable` sur `tasks`, `finances`,
-   `thoughts`, `reminders`, `decision_audit` — remonter en `service_role` uniquement si des écritures
-   backend échouent, en gardant `publishable` pour tout accès potentiellement exposé côté client
-   (dashboard).
+1. Appliquer les 3 migrations SQL dans l'ordre ci-dessus, puis relancer
+   `python -c "from scheduler import build_morning_message; print(build_morning_message())"` pour
+   confirmer un rituel matinal complet (principe + tâches).
+2. Une fois l'incident NVIDIA résolu, relancer un test manuel end-to-end réel (`TrinityFilter.evaluate`
+   + `orchestrator.process_request`) pour confirmer le chemin complet webhook → Trinity → réponse →
+   `decision_audit` en conditions réelles (au-delà des tests mockés déjà verts).
+3. Mettre en place un vrai gestionnaire de process (pm2, tâche planifiée Windows, service) pour
+   `whatsapp-bridge/index.js` et `scheduler.py` — actuellement lancés manuellement en tâche de fond
+   pour cette vérification, pas encore en fonctionnement 24/7 autonome.
