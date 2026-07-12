@@ -1,5 +1,12 @@
 import os
 import sys
+
+# Voir server.py pour le detail : force l'UTF-8 pour eviter un UnicodeEncodeError
+# sur les emojis quand stdout n'est pas un terminal interactif (ex: log redirige).
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from dotenv import load_dotenv
 
 # Importer le nouvel orchestrateur

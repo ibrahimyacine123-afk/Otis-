@@ -1,8 +1,19 @@
+import sys
+import os
+
+# Force l'UTF-8 sur stdout/stderr : sous Windows, dès que la sortie n'est pas un
+# terminal interactif (log redirigé, service, etc.), Python utilise le codepage
+# système (ex: cp1254) qui ne supporte pas les emojis utilisés dans les logs —
+# ce qui fait planter chaque requête avec UnicodeEncodeError -> 500.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from skills.orchestrator import MPCOrchestrator
-import os
+from skills.utils import format_for_whatsapp
 
 app = FastAPI(title="OTIS API")
 orchestrator = MPCOrchestrator()
@@ -25,8 +36,9 @@ async def webhook(payload: MessagePayload):
         
     try:
         response = orchestrator.process_request(payload.message)
-        print(f"📤 Réponse générée : {response}")
-        return {"success": True, "response": response}
+        formatted_response = format_for_whatsapp(response)
+        print(f"📤 Réponse générée : {formatted_response}")
+        return {"success": True, "response": formatted_response}
     except Exception as e:
         print(f"Erreur lors du traitement : {e}")
         raise HTTPException(status_code=500, detail=str(e))

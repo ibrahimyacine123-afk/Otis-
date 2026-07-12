@@ -42,6 +42,30 @@ conformément au mode autonome activé pour ce chantier.
   mais PAS re-testée en conditions réelles au-delà du tout premier appel réussi. **Action requise :
   relancer les tests end-to-end (Phase 5) une fois l'API NVIDIA de nouveau joignable.**
 
+## Phase 4 — WhatsApp + rituel
+
+- **Bug réel trouvé et corrigé (pas introduit par ce chantier) : `UnicodeEncodeError` sur Windows
+  dès que stdout n'est pas un terminal interactif.** En testant le flux `webhook` en local
+  (`uvicorn` avec stdout redirigé vers un fichier de log, ce qui est la situation normale pour un
+  service lancé en tâche de fond), chaque requête plantait avec `UnicodeEncodeError` sur les emojis
+  des `print()` (codepage Windows `cp1254`, pas UTF-8), renvoyant systématiquement une 500 au pont
+  WhatsApp. Corrigé en forçant `sys.stdout.reconfigure(encoding="utf-8")` en tête de `server.py`,
+  `otis.py` et `scheduler.py`. Revérifié : le rejet d'un numéro non autorisé renvoie maintenant bien
+  403 avec logs lisibles. **Ce bug aurait cassé le pont WhatsApp en usage réel (service/systemd/tâche
+  planifiée) sans jamais se voir en test interactif dans un terminal.**
+
+- **Test du chemin "numéro autorisé" du webhook non concluant** : bloqué par le même incident API
+  NVIDIA que documenté plus haut (le call `orchestrator.process_request` → `trinity.evaluate`
+  atteint bien le code, mais le POST vers NVIDIA reste bloqué). Le routage, l'auth et le formatage
+  WhatsApp sont vérifiés ; le passage réel par le LLM ne l'est pas au-delà du tout premier test réussi.
+
+- **Envoi WhatsApp sortant non testable en conditions réelles dans cet environnement.** Le nouvel
+  endpoint `POST /send` du pont (`whatsapp-bridge/index.js`) est vérifié par lecture de code et
+  `node --check` (syntaxe OK), mais son exécution réelle nécessite une session WhatsApp Web
+  authentifiée (scan de QR code) — impossible à faire de façon autonome/headless. **Action requise :
+  lancer `node index.js`, scanner le QR, puis lancer `python scheduler.py` (ou déclencher
+  manuellement `send_morning_ritual()`) pour valider l'envoi réel.**
+
 - **Changement de clé Supabase.** L'ancienne `SUPABASE_KEY` dans `.env` était un
   JWT `service_role` (accès complet, contourne les RLS). La nouvelle clé fournie
   (`sb_publishable_...`) est une clé publique/anon. Si des policies RLS

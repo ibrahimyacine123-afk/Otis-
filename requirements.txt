@@ -9,3 +9,5 @@ streamlit
 pandas
 duckduckgo-search
 dateparser
+apscheduler
+requests

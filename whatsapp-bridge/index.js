@@ -4,6 +4,7 @@ const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const axios = require('axios');
 const fs = require('fs');
+const http = require('http');
 
 // Intercepter et ignorer les erreurs de destruction de contexte Puppeteer (rechargements WhatsApp)
 // Intercepter et ignorer les erreurs de destruction de contexte Puppeteer (rechargements WhatsApp)
@@ -216,6 +217,56 @@ client.on('message', async msg => {
         console.error('❌ Erreur de communication avec FastAPI :', error.message);
         await msg.reply("Désolé, mon cerveau est actuellement hors ligne ou une erreur s'est produite. 🤖🔌");
     }
+});
+
+// =========================================================================
+// Serveur d'envoi sortant (Phase 4 : rituel matinal, messages proactifs OTIS)
+// Ecoute des requetes POST /send {to, message} venant du scheduler Python.
+// N'utilise que le module http natif pour eviter une dependance npm de plus.
+// =========================================================================
+const SEND_PORT = process.env.OTIS_BRIDGE_SEND_PORT || 8002;
+
+const sendServer = http.createServer((req, res) => {
+    if (req.method !== 'POST' || req.url !== '/send') {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Route inconnue' }));
+        return;
+    }
+
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+        try {
+            const { to, message } = JSON.parse(body || '{}');
+
+            if (!to || !message) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: "'to' et 'message' sont requis." }));
+                return;
+            }
+
+            if (!ALLOWED_NUMBERS.includes(to)) {
+                console.log(`⚠️ [/send] Refus d'envoi vers un numero non autorise : ${to}`);
+                res.writeHead(403, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: 'Numero non autorise.' }));
+                return;
+            }
+
+            const chatId = `${to}@c.us`;
+            await client.sendMessage(chatId, message);
+            console.log(`📤 [/send] Message proactif envoye a ${to}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+        } catch (err) {
+            console.error('❌ [/send] Erreur d\'envoi :', err.message);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+    });
+});
+
+sendServer.listen(SEND_PORT, () => {
+    console.log(`📡 Serveur d'envoi OTIS actif sur le port ${SEND_PORT} (POST /send { to, message })`);
 });
 
 console.log("🚀 Initialisation du client WhatsApp...");
