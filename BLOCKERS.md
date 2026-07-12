@@ -26,6 +26,22 @@ conformément au mode autonome activé pour ce chantier.
   écrasant l'ancien commit distant. L'ancien commit reste récupérable via le
   reflog GitHub pendant un certain temps si besoin de le consulter.
 
+- **API NVIDIA (integrate.api.nvidia.com) devenue injoignable en cours de chantier — POST bloqué/hang.**
+  Le tout premier test de `TrinityFilter.evaluate()` (juste après l'écriture du module) a réussi et
+  retourné des scores corrects (ego=8, clarté=2, foi=6, émotion=avidité/8 sur le message levier x3
+  USDT/TRY — exactement le scénario attendu en Phase 5). Quelques minutes plus tard, tout appel POST
+  vers `https://integrate.api.nvidia.com/v1/chat/completions` se met à bloquer indéfiniment (testé
+  jusqu'à 5 fois : SDK OpenAI par défaut, SDK avec `timeout=20s`/`max_retries=1` explicites, puis
+  `curl -X POST` brut avec la même clé — tous restent bloqués au-delà de 20-40s sans réponse ni erreur).
+  Diagnostic : `curl GET /v1/models` sur le même hôte répond en 0.3s (HTTP 200) — la connectivité
+  réseau vers l'hôte fonctionne, seul le POST vers `/v1/chat/completions` reste bloqué. Ce n'est donc
+  pas un bug dans `llm_client.py`/`trinity.py`/`orchestrator.py` (le code identique fonctionnait au
+  premier essai) mais un blocage externe (API NVIDIA en incident, ou filtrage réseau côté sandbox
+  spécifique à ce endpoint/verbe). **Contournement : aucun disponible côté code.** La suite du chantier
+  (Phases 2-5) a donc été implémentée et vérifiée par compilation Python (`py_compile`) et relecture,
+  mais PAS re-testée en conditions réelles au-delà du tout premier appel réussi. **Action requise :
+  relancer les tests end-to-end (Phase 5) une fois l'API NVIDIA de nouveau joignable.**
+
 - **Changement de clé Supabase.** L'ancienne `SUPABASE_KEY` dans `.env` était un
   JWT `service_role` (accès complet, contourne les RLS). La nouvelle clé fournie
   (`sb_publishable_...`) est une clé publique/anon. Si des policies RLS
