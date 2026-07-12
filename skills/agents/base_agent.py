@@ -1,6 +1,5 @@
-import os
 import json
-from openai import OpenAI
+from ..llm_client import get_llm_client, get_llm_model
 
 class BaseAgent:
     def __init__(self, name: str, role: str, system_prompt: str, tools: list):
@@ -8,16 +7,9 @@ class BaseAgent:
         self.role = role
         self.system_prompt = system_prompt
         self.tools = tools
-        
-        nvidia_api_key = os.environ.get("NVIDIA_API_KEY")
-        if not nvidia_api_key:
-            raise ValueError("NVIDIA_API_KEY manquante.")
-            
-        self.client = OpenAI(
-            base_url="https://integrate.api.nvidia.com/v1",
-            api_key=nvidia_api_key
-        )
-        self.model = "meta/llama-3.3-70b-instruct"
+
+        self.client = get_llm_client()
+        self.model = get_llm_model()
 
     def execute_tool(self, name: str, args: dict) -> str:
         """Méthode à surcharger dans chaque agent spécifique."""

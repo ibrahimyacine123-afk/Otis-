@@ -60,3 +60,25 @@ class TaskManager:
         except Exception as e:
             print(f"Erreur lors de la récupération des tâches : {e}")
             return []
+
+    def get_daily_summary(self) -> dict:
+        """Résumé du jour (inspiré Leantime/Plane) : tâches dues aujourd'hui + en cours + en retard."""
+        from datetime import datetime, timezone, timedelta
+        try:
+            now = datetime.now(timezone.utc)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            today_end = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat()
+
+            due_today = self.db.table("tasks").select("*").gte("due_date", today_start).lt("due_date", today_end).in_("status", ["todo", "in_progress", "backlog"]).execute().data
+            overdue = self.db.table("tasks").select("*").lt("due_date", today_start).in_("status", ["todo", "in_progress", "backlog"]).execute().data
+            in_progress = self.db.table("tasks").select("*").eq("status", "in_progress").execute().data
+
+            return {
+                "success": True,
+                "due_today": due_today,
+                "overdue": overdue,
+                "in_progress": in_progress
+            }
+        except Exception as e:
+            print(f"Erreur lors du résumé du jour : {e}")
+            return {"success": False, "due_today": [], "overdue": [], "in_progress": [], "error": str(e)}
