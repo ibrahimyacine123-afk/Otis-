@@ -1,5 +1,5 @@
 import json
-from ..llm_client import get_llm_client, get_llm_model
+from ..llm_client import get_llm_client, get_llm_model, chat_completion_with_fallback
 
 class BaseAgent:
     def __init__(self, name: str, role: str, system_prompt: str, tools: list):
@@ -23,8 +23,7 @@ class BaseAgent:
         ]
         
         for iteration in range(5):
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = chat_completion_with_fallback(
                 messages=messages,
                 tools=self.tools,
                 tool_choice="auto",

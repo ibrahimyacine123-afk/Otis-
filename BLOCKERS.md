@@ -71,7 +71,7 @@ puisque `wisdom_principles` n'existe pas encore et que les tables de tâches son
 lieu de planter. Une fois les migrations et le correctif RLS appliqués, le contenu sera complet sans
 changement de code.
 
-## Résumé des actions manuelles restantes
+## Résumé des actions manuelles restantes (round 1 — résolu au round 2 ci-dessous)
 
 1. Coller `backend/migrations/trinity_schema.sql`, `backend/migrations/finance_accounts.sql`, puis
    `backend/migrations/rls_policies_fix.sql` (dans cet ordre) dans le SQL Editor du projet Supabase
@@ -80,3 +80,45 @@ changement de code.
    `SUPABASE_KEY` en clé `service_role` (plus strict, RLS conservé fermé pour `anon`).
 3. Réessayer les appels LLM (`tests/test_trinity.py` en mode réel, ou `TrinityFilter.evaluate()` direct)
    une fois l'incident NVIDIA sur `meta/llama-3.3-70b-instruct` résolu côté NVIDIA.
+
+## Round 2 — après application des 3 migrations SQL
+
+**1. `decision_audit` en écriture réelle — ✅ confirmé.** Insert direct via
+`TrinityFilter.log_decision(...)`, relu via `SELECT ... WHERE id = ...`, contenu identique
+(ego=8, clarté=2, foi=6, émotion=avidité/8), puis supprimé (nettoyage de la ligne de test).
+La fonction `log_decision_with_trinity` et les tables existent bien désormais sur le projet.
+
+**2. INSERT sur `tasks`/`thoughts`/`finances`/`reminders`/`accounts`/`wisdom_principles` — ✅ confirmé.**
+Testé un insert + delete de nettoyage sur chacune des 6 tables : toutes acceptent l'écriture avec la
+clé `sb_publishable_...` actuelle. La policy `rls_policies_fix.sql` fonctionne comme prévu.
+
+**3. Fallback NVIDIA (`skills/llm_client.py`) — ✅ implémenté et testé en conditions réelles.**
+`chat_completion_with_fallback()` : tente `NVIDIA_MODEL` (par défaut `meta/llama-3.3-70b-instruct`)
+dans un thread **démon** (pas `ThreadPoolExecutor` — un premier essai avec `ThreadPoolExecutor` a fait
+hang tout le processus à la sortie, car ses workers sont rejoints via `atexit` et l'appel bloqué ne
+revient jamais ; un `threading.Thread(daemon=True)` + `queue.Queue` évite ce problème : le thread perdu
+ne bloque plus la fin du programme). Si pas de réponse en 30s (`PRIMARY_TIMEOUT_SECONDS`), bascule sur
+`NVIDIA_FALLBACK_MODEL` (par défaut `meta/llama-3.1-70b-instruct`) et journalise le basculement
+(`print` + à terme un vrai logger). Testé en réel : le modèle primaire est **toujours en incident**
+(timeout confirmé à nouveau après 30s), le fallback répond correctement (`meta/llama-3.1-70b-instruct`,
+réponse en 0.4 à 18s selon l'essai). Limite connue et assumée : chaque timeout laisse un thread
+"perdu" tourner indéfiniment en arrière-plan (thread démon, donc sans danger pour l'arrêt du process,
+mais consomme une connexion réseau tant que NVIDIA ne la ferme pas côté serveur).
+
+**4. Test end-to-end réel complet — ✅ confirmé, avec fallback.** `POST /webhook` avec le message
+exact du scénario Phase 5 (*"Dois-je faire du levier x3 sur USDT/TRY ? Le marché est chaud"*) depuis
+un numéro autorisé → `200 OK` en 71.8s (2 appels LLM, chacun 30s de timeout primaire + fallback) →
+réponse OTIS conforme à la persona (nomme l'émotion "avidité", questionne ego vs sagesse, exige
+montant/date/méthode exacts) → décision réellement journalisée dans `decision_audit`
+(`ego_test_score=8, desire_clarity_score=2` — cohérent, ligne conservée car c'est un vrai résultat,
+pas un test synthétique).
+
+## Ce qui reste à surveiller
+
+- **Incident NVIDIA sur `meta/llama-3.3-70b-instruct`** toujours actif au moment de cette vérification
+  (isolé précisément : gateway/auth OK, seule l'inférence de ce modèle hang). Le fallback absorbe le
+  problème mais chaque requête coûte +30s de latence tant que ce n'est pas résolu côté NVIDIA. Aucune
+  action possible de notre côté au-delà du fallback déjà en place.
+- **Policy RLS permissive** toujours en place (compromis sécurité documenté plus haut) — décision à
+  prendre par l'utilisateur : la garder (fonctionne, mono-utilisateur) ou migrer vers une clé
+  `service_role` pour le backend.

@@ -6,7 +6,7 @@ from .agents.business_agent import BusinessAgent
 from .agents.productivity_agent import ProductivityAgent
 from .web_search import WebSearcher
 from .trinity import TrinityFilter
-from .llm_client import get_llm_client, get_llm_model
+from .llm_client import get_llm_client, get_llm_model, chat_completion_with_fallback
 
 load_dotenv()
 
@@ -168,8 +168,7 @@ Nomme l'émotion perçue, questionne doucement la motivation (ego vs sagesse), p
 (montant/date/méthode précis) avant d'aller plus loin."""
 
         try:
-            completion = self.client.chat.completions.create(
-                model=self.model,
+            completion = chat_completion_with_fallback(
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": prompt}
@@ -212,8 +211,7 @@ Nomme l'émotion perçue, questionne doucement la motivation (ego vs sagesse), p
 
         max_iterations = 6
         for iteration in range(max_iterations):
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = chat_completion_with_fallback(
                 messages=messages,
                 tools=self.tools,
                 tool_choice="auto",

@@ -1,10 +1,11 @@
-# RAPPORT — Chantier OTIS 5 phases + vérification finale (exécution autonome)
+# RAPPORT — Chantier OTIS 5 phases + 2 rondes de vérification (exécution autonome)
 
-Repo : https://github.com/ibrahimyacine123-afk/Otis-.git — 6 commits (Phase 1 à 5 + vérification), tous poussés sur `main`.
+Repo : https://github.com/ibrahimyacine123-afk/Otis-.git — 7 commits, tous poussés sur `main`.
 
-**Mise à jour (ronde de vérification post-"3 blockers manuels réglés")** : sur les 3 points annoncés
-comme réglés, 1 seul l'était réellement (session WhatsApp). Voir détail point par point ci-dessous et
-dans `BLOCKERS.md` — rien n'est caché, tout a été re-testé en direct avec des preuves concrètes.
+**Round 1** (post-"3 blockers manuels réglés") : 1 seul des 3 points annoncés comme réglés l'était
+réellement (session WhatsApp). **Round 2** (post-"3 migrations SQL appliquées") : **tout est
+maintenant vert**, y compris un test end-to-end réel complet avec un fallback de modèle NVIDIA
+ajouté et validé en conditions réelles. Détail ci-dessous.
 
 ## Ce qui est fait
 
@@ -69,27 +70,46 @@ dans `BLOCKERS.md` — rien n'est caché, tout a été re-testé en direct avec 
    de bout en bout ; contenu incomplet uniquement parce que les points 2 et 3 ne sont pas encore
    résolus côté base — dégradation propre, pas de crash.
 
-## Ce qui reste fragile
+## Round 2 — après application des 3 migrations SQL (tout vérifié en conditions réelles)
 
-Détail complet et actions manuelles restantes dans `BLOCKERS.md`. En bref, dans l'ordre de priorité :
+1. **`decision_audit` en écriture réelle — ✅.** Insert → lecture → contenu identique confirmé →
+   suppression de la ligne de test.
+2. **INSERT sur `tasks`/`thoughts`/`finances`/`reminders`/`accounts`/`wisdom_principles` — ✅.**
+   Les 6 tables acceptent l'écriture avec la clé publishable actuelle (la policy RLS fonctionne).
+3. **Fallback NVIDIA ajouté et testé — ✅.** `skills/llm_client.py::chat_completion_with_fallback()` :
+   modèle primaire dans un thread démon (30s max), bascule automatique sur
+   `meta/llama-3.1-70b-instruct` si timeout, journalisée. Branché sur les 4 points d'appel LLM de
+   l'app (`trinity.py`, `orchestrator.py` ×2, `base_agent.py`). Testé en réel : le modèle primaire
+   est toujours en incident côté NVIDIA (confirmé à nouveau), le fallback répond correctement.
+   2 tests automatisés mockés ajoutés (`tests/test_llm_fallback.py`).
+4. **Test end-to-end réel complet — ✅.** `POST /webhook` avec le message exact du scénario Phase 5,
+   depuis un numéro autorisé → `200 OK` (71.8s, 2 appels LLM avec fallback) → réponse OTIS conforme
+   à la persona Trinity → décision réellement journalisée dans `decision_audit`.
 
-1. Appliquer dans le SQL Editor Supabase, **dans cet ordre**, sur le bon projet
-   (`tmvhhpxerequhvdevvms`) : `trinity_schema.sql` → `finance_accounts.sql` → `rls_policies_fix.sql`.
-2. Décider policy RLS permissive vs clé `service_role` (compromis sécurité expliqué dans les deux
-   fichiers concernés).
-3. Réessayer les appels LLM une fois l'incident NVIDIA résolu côté NVIDIA (hors de notre contrôle).
-4. **Conflit d'historique Git résolu par `--force push`** au tout début du chantier (remote contenait
-   un ancien commit partiel et incompatible) — décision documentée, irréversible côté remote au-delà
-   de la fenêtre de reflog GitHub.
+**Bonus (trouvé en testant le fallback)** : `ThreadPoolExecutor` faisait hang tout le process à la
+sortie (ses workers sont rejoints via `atexit`, et un appel bloqué ne revient jamais) — remplacé par
+un `threading.Thread(daemon=True)` + `queue.Queue`. Aussi : le fix UTF-8 (Phase 4) n'était appliqué
+que dans 3 entrypoints — un `print` avec emoji dans le nouveau code de fallback a re-planté le même
+`UnicodeEncodeError` dans un contexte non couvert (tests). Corrigé en centralisant le fix dans
+`skills/__init__.py`, qui s'applique désormais à tout import du package `skills`, pas seulement aux
+3 entrypoints déjà corrigés.
+
+## Ce qui reste
+
+- **Incident NVIDIA sur `meta/llama-3.3-70b-instruct`** toujours actif (hors de notre contrôle) —
+  absorbé par le fallback, au prix de +30s de latence par appel LLM tant que ce n'est pas résolu.
+- **Policy RLS permissive** en place (compromis sécurité documenté) — décision à prendre : la garder
+  (mono-utilisateur, fonctionne) ou migrer le backend vers une clé `service_role`.
+- **Conflit d'historique Git résolu par `--force push`** au tout début du chantier — décision
+  documentée, irréversible côté remote au-delà de la fenêtre de reflog GitHub.
+- `whatsapp-bridge/index.js` et `scheduler.py` tournent actuellement en tâche de fond manuelle pour
+  cette vérification — pas encore de gestionnaire de process pour un fonctionnement 24/7 (pm2, tâche
+  planifiée Windows, service).
 
 ## Prochaines étapes suggérées
 
-1. Appliquer les 3 migrations SQL dans l'ordre ci-dessus, puis relancer
-   `python -c "from scheduler import build_morning_message; print(build_morning_message())"` pour
-   confirmer un rituel matinal complet (principe + tâches).
-2. Une fois l'incident NVIDIA résolu, relancer un test manuel end-to-end réel (`TrinityFilter.evaluate`
-   + `orchestrator.process_request`) pour confirmer le chemin complet webhook → Trinity → réponse →
-   `decision_audit` en conditions réelles (au-delà des tests mockés déjà verts).
-3. Mettre en place un vrai gestionnaire de process (pm2, tâche planifiée Windows, service) pour
-   `whatsapp-bridge/index.js` et `scheduler.py` — actuellement lancés manuellement en tâche de fond
-   pour cette vérification, pas encore en fonctionnement 24/7 autonome.
+1. Mettre en place un vrai gestionnaire de process pour `whatsapp-bridge/index.js` (pont WhatsApp,
+   doit tourner en continu) et `scheduler.py` (rituel matinal).
+2. Trancher le compromis RLS permissive vs clé `service_role`.
+3. Surveiller la résolution de l'incident NVIDIA côté NVIDIA (rien à faire de notre côté, le fallback
+   absorbe déjà le problème).

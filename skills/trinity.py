@@ -2,7 +2,7 @@ import json
 from dotenv import load_dotenv
 
 from .db import get_supabase_client
-from .llm_client import get_llm_client, get_llm_model
+from .llm_client import get_llm_client, get_llm_model, chat_completion_with_fallback
 
 load_dotenv()
 
@@ -59,8 +59,7 @@ class TrinityFilter:
             "emotion_score": 0
         }
         try:
-            completion = self.client.chat.completions.create(
-                model=self.model,
+            completion = chat_completion_with_fallback(
                 messages=[
                     {"role": "system", "content": TRINITY_PROMPT},
                     {"role": "user", "content": user_input}
