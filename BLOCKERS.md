@@ -3,6 +3,38 @@
 Journal des blocages, contournements et décisions prises sans validation humaine.
 Mis à jour après la ronde de vérification post-"3 blockers manuels réglés".
 
+## Incident "OTIS ne répond plus" (2026-07-13) — 2 causes distinctes trouvées
+
+**Cause 1 (session précédente) : `whatsapp-bridge` zombie.** Le process Node tournait mais sa page
+Puppeteer avait une "frame détachée" en continu depuis la veille (crash silencieux de la page WhatsApp
+Web sans que le process ne meure). `server.py` était, lui, complètement arrêté. Les deux ont été
+relancés ; le nettoyage automatique des pop-up modales ("What's new on WhatsApp Web") a aussi été
+renforcé (nouveaux sélecteurs + fallback touche Échap) car l'ancien code ne fermait pas cette modale
+et bloquait le passage à l'état "ready".
+
+**Cause 2 (ce round) : bug réel dans `whatsapp-bridge/index.js`, jamais vu avant.** Le numéro
+WhatsApp lié au bridge (via QR code) est le numéro personnel du propriétaire — visible comme
+`(You)` dans sa propre liste de discussions WhatsApp. Un test effectué en s'écrivant à soi-même
+("Message à toi-même") ne déclenche **jamais** l'événement `message` de `whatsapp-web.js`, qui
+ignore par conception tous les messages `fromMe` (y compris dans le self-chat), pour éviter les
+boucles bot-répond-à-lui-même. Résultat : le message "Otis tes la" envoyé à 12:13 est bien arrivé
+dans WhatsApp (visible dans l'UI, lu) mais n'a **jamais atteint le code du bridge**, donc jamais
+`/webhook`, donc jamais de réponse — la chaîne cassait à l'étape 0 (avant même le bridge), pas côté
+serveur. **Corrigé** : ajout d'un second handler `client.on('message_create', ...)` qui capte
+spécifiquement les messages `fromMe` du self-chat (`msg.to === son propre numéro`) et les traite
+comme des commandes, sans toucher au handler `message` existant (qui reste inchangé pour les vrais
+contacts). Protection anti-boucle réutilisée (`sentMessagesCache`).
+
+**Process manager — toujours pas en place.** `server.py` n'avait pas crashé cette fois (toujours en
+vie, juste un `404` normal sur `/health` qui n'existe pas), mais il avait été trouvé complètement
+arrêté lors de l'incident précédent, sans trace de crash dans les logs — probablement tué avec le
+process parent qui l'avait lancé en tâche de fond plutôt qu'un vrai crash applicatif. Un wrapper
+resilient est prêt (`run_server_resilient.sh`, boucle de redémarrage automatique) mais **pas encore
+adopté en usage réel** — server.py tourne toujours en lancement manuel simple. Le pont WhatsApp a le
+même besoin. **Action requise : mettre en place un vrai gestionnaire de process (pm2, tâche planifiée
+Windows/service, ou `run_server_resilient.sh` a minima) pour que les deux survivent aux redémarrages
+de session et aux arrêts silencieux.**
+
 ## Résolus lors du chantier initial (Phases 1-5)
 
 - **Conflit d'historique Git résolu par force-push.** Le remote contenait un ancien commit
